@@ -2,8 +2,9 @@
 """Convert drivers.csv to WinISD .wdr files using only Python's standard library.
 
 Usage: python3 csv_to_wdr.py [drivers.csv] --output WDR
+With no CSV argument, both drivers.csv and drivers_partial.csv are loaded.
 Units are explicit in CSV headers. WDR uses SI units. Source values are not
-averaged or reconciled; incomplete rows stay in the CSV and are skipped unless
+averaged or reconciled; rows below the WinISD minimum are skipped unless
 --include-incomplete is requested. See README.md for field mappings and limits.
 """
 
@@ -74,6 +75,12 @@ CSV_ONLY = {
 }
 NUMERIC_COLUMNS = set(FIELD_MAP) | CSV_ONLY
 MINIMUM = ("fs_hz", "qts", "vas_l")
+# Completeness of the app's primary feed, distinct from WinISD's import minimum.
+# Rms, derived quantities, power ratings and physical dimensions are optional.
+COMPLETE_PARAMETERS = (
+    "impedance_ohm", "fs_hz", "qts", "qes", "qms", "vas_l", "re_ohm",
+    "le_mh", "sd_cm2", "mms_g", "cms_mm_per_n", "bl_tm", "xmax_mm",
+)
 
 # Field names/order checked against driver files bundled with WinISD 0.7.950.
 # Its legacy .wdr files omit ParState, dates and author fields are optional.
@@ -124,6 +131,40 @@ def read_csv(path: Path) -> list[dict]:
                 item[column] = decimal_value(row.get(column), column, line)
             rows.append(item)
         return rows
+
+
+def missing_full_parameters(row: dict) -> list[str]:
+    """Missing/invalid fields for drivers.csv; no calculated substitutes.
+
+    Numeric inputs use the Decimal values returned by read_csv. An explicit
+    zero inductance is valid; other required numeric values must be positive.
+    """
+    missing = [key for key in ("manufacturer", "model")
+               if not str(row.get(key) or "").strip()]
+    for key in COMPLETE_PARAMETERS:
+        value = row.get(key)
+        if (value is None or not value.is_finite() or value < 0
+                or (key != "le_mh" and value == 0)):
+            missing.append(key)
+    return missing
+
+
+def read_inputs(csv_file: Path | None = None) -> list[dict]:
+    """Default regeneration includes both feeds; an explicit path selects one.
+
+    Combining the feeds before naming files preserves collision suffixes and
+    deduplication across the full, previously published WDR library.
+    """
+    paths = [csv_file] if csv_file is not None else [HERE / "drivers.csv"]
+    partial = HERE / "drivers_partial.csv"
+    if csv_file is None and partial.exists():
+        paths.append(partial)
+    rows = []
+    for path in paths:
+        for row in read_csv(path):
+            row["source_file"] = path.name
+            rows.append(row)
+    return rows
 
 
 def number_text(value: Decimal) -> str:
@@ -187,7 +228,8 @@ def compile_files(rows: list[dict], include_incomplete: bool = False):
     files, details, counts = {}, [], Counter(rows=len(rows))
     candidates = {}
     for row in rows:
-        label = f"line {row['line']}: {row['manufacturer']} {row['model']}".strip()
+        source = f"{row['source_file']}: " if row.get("source_file") else ""
+        label = f"{source}line {row['line']}: {row['manufacturer']} {row['model']}".strip()
         if not ascii_label(row["manufacturer"]) or not ascii_label(row["model"]):
             counts["missing_identity"] += 1
             details.append(f"SKIP {label}: missing manufacturer or model after ASCII conversion")
@@ -263,7 +305,8 @@ def write_files(files: dict[str, bytes], directory: Path, clean: bool = False) -
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("csv_file", nargs="?", type=Path, default=HERE / "drivers.csv")
+    parser.add_argument("csv_file", nargs="?", type=Path, default=None,
+                        help="one CSV to convert; omitted loads drivers.csv and drivers_partial.csv")
     parser.add_argument("--output", "-o", type=Path, default=HERE / "WDR")
     parser.add_argument("--include-incomplete", action="store_true", help="also emit partial driver records; these cannot necessarily start a project")
     parser.add_argument("--clean", action="store_true", help="remove all existing .wdr files in the output directory before writing")
@@ -271,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="show every skipped row and consistency warning")
     args = parser.parse_args(argv)
     try:
-        files, counts, details = compile_files(read_csv(args.csv_file), args.include_incomplete)
+        files, counts, details = compile_files(read_inputs(args.csv_file), args.include_incomplete)
         if not args.check:
             write_files(files, args.output, args.clean)
         if args.verbose:

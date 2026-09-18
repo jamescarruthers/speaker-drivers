@@ -1,22 +1,57 @@
 # Loudspeaker T/S data and WinISD drivers
 
-`drivers.csv` contains **2,348 records** with manufacturer, model and numeric
-specifications only, in **76 columns**. `WDR/` contains **1,321 generated WinISD driver files**.
+`drivers.csv` contains **606 records with a complete core T/S parameter set**.
+`drivers_partial.csv` retains the other **1,742 records**. Both files use the
+same **76 columns**, containing manufacturer, model and numeric specifications
+only. Together they preserve all **2,348 original records** and their values.
+`WDR/` contains **1,321 generated WinISD driver files**.
 The converter uses Python 3.10 or newer and has no external dependencies.
 
 ```text
 drivers.csv
+drivers_partial.csv
 csv_to_wdr.py
 WDR/
 tests/test_csv_to_wdr.py
+tests/test_csv_feeds.py
 ```
+
+## CSV feeds and completeness
+
+The existing app feed remains at the same filename and URL:
+
+- [drivers.csv](https://raw.githubusercontent.com/jamescarruthers/speaker-drivers/main/drivers.csv): complete core T/S records.
+- [drivers_partial.csv](https://raw.githubusercontent.com/jamescarruthers/speaker-drivers/main/drivers_partial.csv): records missing one or more required fields.
+
+Both files retain the existing column names, order, units and blank-cell format.
+Rows retain their original relative order within each file. No values are filled,
+calculated or changed by the split, and no metadata columns are added.
+
+A complete record has a nonblank manufacturer and model, and published values in
+all of these fields:
+
+```text
+impedance_ohm, fs_hz, qts, qes, qms, vas_l, re_ohm, le_mh,
+sd_cm2, mms_g, cms_mm_per_n, bl_tm, xmax_mm
+```
+
+These numeric values must be finite and positive, except that an explicit zero
+inductance is allowed. Additional fields such as Rms, Vd, sensitivity, power
+ratings, dimensions and advanced model parameters are optional. They retain
+their existing values or blanks. A peak-to-peak excursion value does not fill
+a missing `xmax_mm` in the CSV. The rule is implemented by
+`missing_full_parameters()` in `csv_to_wdr.py` and checked by the tests.
+
+Completeness describes parameter availability, not independent validation of
+every source value or resolution of existing conflicts.
 
 ## Use and regenerate
 
 Copy the `.wdr` files into your WinISD driver library, normally
 `Documents\WinISD\drivers` on Windows, then reopen WinISD.
 
-From this repository directory, regenerate the library with:
+From this repository directory, regenerate the existing library from **both
+CSVs** with:
 
 ```sh
 python csv_to_wdr.py
@@ -29,11 +64,16 @@ consistency flags without writing files:
 python csv_to_wdr.py --check --verbose
 ```
 
-An alternative CSV and output directory can be supplied:
+An explicit CSV argument selects only that file. For example, export only the
+complete core T/S records to a separate directory:
 
 ```sh
-python csv_to_wdr.py drivers.csv --output WDR
+python csv_to_wdr.py drivers.csv --output WDR_complete
 ```
+
+Omitting the CSV argument combines both feeds before deduplication and filename
+generation, preserving the existing `WDR/` filenames and contents. Passing just
+one feed can change collision suffixes within that separately generated subset.
 
 `--clean` removes existing `.wdr` files directly inside the selected output
 directory before regenerating it. Use it when removing or renaming CSV records
@@ -42,11 +82,12 @@ records, which may need additional parameters before they can be used.
 
 ## Coverage and data limitations
 
-The default export requires positive **Fs, Qts and Vas**, the minimum parameters
-specified in WinISD's bundled help. It skips 1,015 incomplete records and 10
-records without a usable manufacturer/model. All these rows remain in the CSV.
-Identical WDR outputs are deduplicated; distinct parameter sets are preserved.
-Two identical WDR outputs are deduplicated. The CSV retains all source records.
+The WDR converter requires positive **Fs, Qts and Vas**, the minimum parameters
+specified in WinISD's bundled help. This is a less strict rule than the complete
+CSV feed. When loading both feeds, it skips 1,015 records below this minimum and
+10 records without a usable manufacturer/model. All of these rows are retained
+in `drivers_partial.csv`. Two identical WDR outputs are deduplicated; distinct
+parameter sets are preserved.
 
 A missing-value recovery pass examined 1,456 retained PDFs, filled **947 numeric
 cells**, recovered four manufacturer names and corrected two numeric cells in
@@ -60,7 +101,7 @@ including Vas **0.059 L**, plus the available geometry and qualified sensitivity
 Dayton Audio ME650C is a complete two-way ceiling speaker: the manufacturer
 publishes system specifications, but no bare-woofer Fs/Qts/Vas set in its sheet.
 Its sensitivity is corrected to **88 dB at 1 W/1 m**, with the published ±3 dB
-tolerance. It remains in the CSV and is skipped by the default WDR export.
+tolerance. It remains in `drivers_partial.csv` and is skipped by the default WDR export.
 Manufacturer sheets: [Wavecor TW030WA05–08](https://www.wavecor.com/Driver%20specifications%20PDF/TW030WA05_06_07_08_specifications.pdf),
 [Wavecor overview](https://www.wavecor.com/Driver%20specifications%20PDF/Driver_specifications_overview.pdf),
 [Dayton ME650C](https://www.daytonaudio.com/images/resources/300-430-dayton-audio-me650c-architectural-and-engineering-specification-sheet.pdf).
@@ -86,11 +127,12 @@ colliding filenames receive a content hash, which is not a revision identifier.
 
 ## Driver diameter and physical dimensions
 
-The CSV has **29 dedicated dimensional fields**. **1,541 records** have at
+Both CSVs have **29 dedicated dimensional fields**. Across the two files,
+**1,541 records** have at
 least one populated field. All new lengths use **millimetres**; the existing
 `nominal_diameter_in` column retains its original values.
 
-| Measurement | CSV field | Records |
+| Measurement | CSV field | Records across both CSVs |
 | --- | --- | ---: |
 | Advertised driver size | `nominal_diameter_mm` | 792 |
 | Published outside/frame diameter | `overall_diameter_mm` | 733 |
@@ -126,7 +168,7 @@ These checks do not constitute independent verification of every dimension.
 ## CSV and WDR units
 
 CSV headers identify units. Blanks mean missing values; an explicit zero remains
-zero. The UTF-8 CSV includes selected values from the consolidated dataset plus
+zero. The two UTF-8 CSVs include selected values from the consolidated dataset plus
 the supported recovery values and corrections described above. It contains no
 source URLs, identifiers, timestamps or audit metadata.
 
@@ -198,4 +240,4 @@ python -m unittest discover -s tests -v
 Tests cover unit conversion, missing data, sensitivity references, excursion,
 conflicting values, physical dimension conversions, filename collisions,
 malformed input, filtered power, advanced parameters and regeneration. All 15
-converter tests pass.
+converter tests and six feed/completeness tests pass.

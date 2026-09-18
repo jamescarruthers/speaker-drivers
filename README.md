@@ -28,8 +28,9 @@ The existing app feed remains at the same filename and URL:
 - [drivers_partial.csv](https://raw.githubusercontent.com/jamescarruthers/speaker-drivers/main/drivers_partial.csv): records missing one or more required fields.
 
 Both files retain the existing column names, order, units and blank-cell format.
-Rows retain their original relative order within each file. No values are filled,
-calculated or changed by the split, and no metadata columns are added.
+Rows are sorted by manufacturer, then model, ignoring letter case. Variants with
+matching labels retain their relative order. No values are filled, calculated
+or changed by the split or sort, and no metadata columns are added.
 
 A complete record has a nonblank manufacturer and model, and published values in
 all of these fields:
@@ -61,8 +62,9 @@ every source value or resolution of existing conflicts.
 The workflow reads both CSVs, moves complete records into `drivers.csv` and
 incomplete records into `drivers_partial.csv`, regenerates `WDR/`, and runs the
 tests before publishing. Existing row values, optional specifications and the
-CSV schema are retained. Newly complete rows are appended to the complete feed;
-rows that become incomplete move back to the partial feed. Different parameter
+CSV schema are retained. Both feeds are sorted by manufacturer, then model,
+ignoring letter case, so newly complete rows appear beside the same brand's
+other drivers. Rows that become incomplete move back to the partial feed. Different parameter
 sets for the same model remain separate. Edit an existing row in place rather
 than copying it between files. WDR files are generated outputs; edit the CSVs
 to change driver specifications.

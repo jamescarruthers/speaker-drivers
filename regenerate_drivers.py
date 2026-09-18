@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repartition the two editable CSV feeds and regenerate WDR using Python 3.10+."""
+"""Repartition and sort the CSV feeds, then regenerate WDR using Python 3.10+."""
 
 from __future__ import annotations
 
@@ -62,6 +62,11 @@ def build(root: Path):
             (full if complete else partial).append((raw, parsed))
             promoted += int(source_index == 1 and complete)
             demoted += int(source_index == 0 and not complete)
+    # Sort labels case-insensitively without changing their stored spelling.
+    # Python's stable sort preserves the order of variants with matching labels.
+    for rows in (full, partial):
+        rows.sort(key=lambda item: (item[1]["manufacturer"].casefold(),
+                                   item[1]["model"].casefold()))
     feeds = {
         filename: csv_bytes(headers[0], [raw for raw, _ in rows])
         for filename, rows in zip(FEEDS, (full, partial))

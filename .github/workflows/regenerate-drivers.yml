@@ -1,0 +1,65 @@
+name: Regenerate driver files
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# A queued run checks out the latest main, including any edits made during a run.
+concurrency:
+  group: regenerate-drivers-main
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+
+      - name: Regenerate CSV feeds and WDR files
+        run: python regenerate_drivers.py | tee "$RUNNER_TEMP/driver-generation.txt"
+
+      - name: Validate regenerated data and test the converter
+        run: |
+          python -m unittest discover -s tests -v
+          python regenerate_drivers.py --check
+
+      - name: Publish generated changes
+        run: |
+          git add -- drivers.csv drivers_partial.csv WDR/
+          if git diff --cached --quiet; then
+            echo "Generated files already match the CSV inputs." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Regenerate driver CSV feeds and WinISD files"
+          # A normal push cannot overwrite a newer edit. If main advances during
+          # this run, its push also queues a new run using the latest inputs.
+          git push origin HEAD:main
+
+      - name: Summarize generation
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/driver-generation.txt" ]; then
+            cat "$RUNNER_TEMP/driver-generation.txt" >> "$GITHUB_STEP_SUMMARY"
+          fi

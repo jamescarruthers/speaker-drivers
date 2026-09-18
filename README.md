@@ -1,19 +1,23 @@
 # Loudspeaker T/S data and WinISD drivers
 
-`drivers.csv` contains **606 records with a complete core T/S parameter set**.
-`drivers_partial.csv` retains the other **1,742 records**. Both files use the
+`drivers.csv` contains records with a **complete core T/S parameter set**.
+`drivers_partial.csv` retains records with missing parameters. Both files use the
 same **76 columns**, containing manufacturer, model and numeric specifications
-only. Together they preserve all **2,348 original records** and their values.
-`WDR/` contains **1,321 generated WinISD driver files**.
-The converter uses Python 3.10 or newer and has no external dependencies.
+only. The initial split preserved all **2,348 original records**: 606 complete
+and 1,742 partial, generating 1,321 WinISD files in `WDR/`. Current counts appear
+in the latest successful [generation run](https://github.com/jamescarruthers/speaker-drivers/actions/workflows/regenerate-drivers.yml).
+The scripts use Python 3.10 or newer and have no external dependencies.
 
 ```text
 drivers.csv
 drivers_partial.csv
 csv_to_wdr.py
+regenerate_drivers.py
 WDR/
 tests/test_csv_to_wdr.py
 tests/test_csv_feeds.py
+tests/test_regenerate_drivers.py
+.github/workflows/regenerate-drivers.yml
 ```
 
 ## CSV feeds and completeness
@@ -45,13 +49,61 @@ a missing `xmax_mm` in the CSV. The rule is implemented by
 Completeness describes parameter availability, not independent validation of
 every source value or resolution of existing conflicts.
 
-## Use and regenerate
+## Edit a driver on GitHub
+
+1. Find the existing row in `drivers.csv` or `drivers_partial.csv`, then use
+   GitHub's pencil button to edit that CSV. Enter values in the units named by
+   the column headers. Keep every column, leaving unavailable values blank.
+2. Commit the change to `main`, or merge your pull request into `main`.
+3. Open **Actions → Regenerate driver files** and wait for the run to succeed.
+   The workflow commits any generated changes automatically.
+
+The workflow reads both CSVs, moves complete records into `drivers.csv` and
+incomplete records into `drivers_partial.csv`, regenerates `WDR/`, and runs the
+tests before publishing. Existing row values, optional specifications and the
+CSV schema are retained. Newly complete rows are appended to the complete feed;
+rows that become incomplete move back to the partial feed. Different parameter
+sets for the same model remain separate. Edit an existing row in place rather
+than copying it between files. WDR files are generated outputs; edit the CSVs
+to change driver specifications.
+
+The feed filenames and raw URLs stay the same, so an app can keep using its
+existing URL. It will receive the updated complete feed on its next refresh
+after the successful workflow, subject to any HTTP or app caching.
+
+The workflow runs on pushes to `main`. You can also select **Actions →
+Regenerate driver files → Run workflow**, using the `main` branch. It uses
+GitHub's built-in token; no personal access token or extra secret is required.
+Bot commits made with that token do not start another run. The workflow needs
+permission to write repository contents. If branch protection blocks its push,
+the run fails without bypassing the branch rules. Concurrent runs are queued,
+and normal Git pushes prevent overwriting newer edits.
+
+Invalid numbers or malformed CSV rows stop regeneration. In that case, open
+the failed run's log, correct the indicated input and commit again. Unresolved
+T/S consistency warnings are reported, with supplied values retained. A green
+run can leave a driver in the partial feed when required values are still missing.
+
+## Use and regenerate locally
 
 Copy the `.wdr` files into your WinISD driver library, normally
 `Documents\WinISD\drivers` on Windows, then reopen WinISD.
 
-From this repository directory, regenerate the existing library from **both
-CSVs** with:
+From this repository directory, repartition both feeds and regenerate the
+library with the same command used by GitHub Actions:
+
+```sh
+python regenerate_drivers.py
+```
+
+Both CSV files must exist. All records are validated before writing. Stale
+`.wdr` files directly inside `WDR/` are removed when drivers are renamed or
+deleted. Optional values, numeric precision and duplicate CSV records are
+preserved. To check for pending changes without writing anything, run
+`python regenerate_drivers.py --check` (exit status 1 means regeneration is
+needed or validation failed).
+
+To regenerate only the WDR library, without repartitioning the CSVs:
 
 ```sh
 python csv_to_wdr.py
@@ -84,7 +136,7 @@ records, which may need additional parameters before they can be used.
 
 The WDR converter requires positive **Fs, Qts and Vas**, the minimum parameters
 specified in WinISD's bundled help. This is a less strict rule than the complete
-CSV feed. When loading both feeds, it skips 1,015 records below this minimum and
+CSV feed. In the initial snapshot, it skipped 1,015 records below this minimum and
 10 records without a usable manufacturer/model. All of these rows are retained
 in `drivers_partial.csv`. Two identical WDR outputs are deduplicated; distinct
 parameter sets are preserved.
@@ -108,7 +160,7 @@ Manufacturer sheets: [Wavecor TW030WA05–08](https://www.wavecor.com/Driver%20s
 
 The consolidated values include unresolved source conflicts. The converter
 preserves supplied values without averaging or forcing them to agree. Its
-consistency screen flags **54 generated files**: Qts differs by more than 5%
+consistency screen initially flagged **54 generated files**: Qts differs by more than 5%
 from Qes × Qms / (Qes + Qms), or Fs differs by more than 10% from the resonance
 calculated using Mms and Cms. These checks do not identify every possible error.
 Use `--check --verbose` to locate the flagged records.
@@ -127,7 +179,7 @@ colliding filenames receive a content hash, which is not a revision identifier.
 
 ## Driver diameter and physical dimensions
 
-Both CSVs have **29 dedicated dimensional fields**. Across the two files,
+Both CSVs have **29 dedicated dimensional fields**. In the initial snapshot,
 **1,541 records** have at
 least one populated field. All new lengths use **millimetres**; the existing
 `nominal_diameter_in` column retains its original values.
@@ -239,5 +291,8 @@ python -m unittest discover -s tests -v
 
 Tests cover unit conversion, missing data, sensitivity references, excursion,
 conflicting values, physical dimension conversions, filename collisions,
-malformed input, filtered power, advanced parameters and regeneration. All 15
-converter tests and six feed/completeness tests pass.
+malformed input, filtered power, advanced parameters and regeneration. Feed
+tests check completeness and reproduce every published WDR filename and byte.
+Workflow tests cover promotion and demotion between feeds, preserving cell
+values and duplicate records, invalid-input handling, stale WDR cleanup and
+repeatable generation.
